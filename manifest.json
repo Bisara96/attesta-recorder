@@ -1,0 +1,28 @@
+{
+    "manifest_version": 2,
+    "name": "FYP Selenium Recorder",
+    "description": "This extension is a part of my FYP project used to record user actions on a browser.",
+    "version": "1.0",
+    "homepage_url": "https://github.com/dvidsilva/chrome-ext-sample",
+    "browser_action": {
+        "default_icon": "favicon.png",
+        "default_title": "FYP Record"
+    },
+    "content_scripts": [{
+        "matches": ["*://*/*"],
+        "all_frames": true,
+        "js":      [
+            "scripts/jquery.min.js",
+            "scripts/content.js"
+        ]
+    }],
+    "background" : {
+        "scripts": ["scripts/background.js"]
+    },
+    "permissions": [
+        "activeTab",
+        "storage"
+    ],
+    "content_security_policy": "script-src 'self' https://www.gstatic.com/; object-src 'self'"
+}
+
