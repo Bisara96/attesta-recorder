@@ -3,6 +3,9 @@ let step = {};
 let recording = false;
 let unsavedSteps = [];
 
+const threadId = Math.random();
+
+console.log('START OF THREAD '+threadId);
 
 /* Generate XPath for UI Objects */
 const getElementXPath = (element) => {
@@ -61,6 +64,7 @@ const record = () => {
   setSteps([]);
   console.log('Starting record');
   bindEventsToRecord();
+  addStopButton();
   chrome.runtime.sendMessage({method: 'setStatus', status: true});
 };
 
@@ -69,8 +73,9 @@ const continueRecord = () => {
   chrome.storage.sync.get(['steps'], (items) => {
     recording = true;
     unsavedSteps = items.steps;
-    console.log('Continuing record : STEPS : '+JSON.stringify(unsavedSteps));
+    console.log('Continuing record THREAD '+threadId+' : STEPS : '+JSON.stringify(unsavedSteps));
     bindEventsToRecord();
+    addStopButton();
   });
 };
 
@@ -78,9 +83,10 @@ const continueRecord = () => {
 const stopRecord = () => {
   recording = false;
   unbindEventsToRecord();
+  removeStopButton();
   console.log('Record Stopped');
   chrome.runtime.sendMessage({method: 'setStatus', status: false});
-  printSteps();
+  sendToAgent();
 };
 
 /* Validated the click event UI Object */
@@ -116,11 +122,15 @@ const isValidKeyPress = (e) => {
   const keycode = e.keyCode;
   const el = e.target;
   if ((keycode >= 48 && keycode <=57) || (keycode >= 65 && keycode <= 90)) return false;
-  if (keycode === 13 && el.tagName.toLowerCase() == 'input') return false;
+  if ([32].indexOf(keycode) !== -1 && el.tagName.toLowerCase() == 'input') return false;
   return true;
 };
 
 const onClick = (e) => {
+  if (e.target.id == 'fyp-record-stop-btn') {
+    stopRecord();
+    return;
+  }
   if (!isValidClick(e.target)) return;
   const targetElement = event.target || event.srcElement;
   step = {};
@@ -198,16 +208,35 @@ const setSteps = (stepsList) => {
   chrome.storage.sync.set({steps: stepsList});
 };
 
-const printSteps = () => {
+const sendToAgent = () => {
   chrome.storage.sync.get(['steps'], function(items) {
     console.log('Steps : \n' + JSON.stringify(items.steps));
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', 'http://localhost:8080/record/stop', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify(items.steps));
   });
+};
+
+const addStopButton = () => {
+  const div = document.createElement('DIV');
+  div.id = 'fyp-record-stop-btn-div';
+  const btn = document.createElement('BUTTON');
+  btn.id = 'fyp-record-stop-btn';
+  const btnText = document.createTextNode('STOP');
+  btn.appendChild(btnText);
+  div.appendChild(btn);
+  document.body.appendChild(div);
+};
+
+const removeStopButton = () => {
+  document.body.removeChild(document.getElementById('fyp-record-stop-btn-div'));
 };
 
 window.onbeforeunload = (event) => {
   if (recording) {
     chrome.storage.sync.set({steps: unsavedSteps}, () => {
-      console.log('Uploaded : STEPS : '+JSON.stringify(unsavedSteps));
+      console.log('Uploaded : THREAD '+threadId+' : STEPS : '+JSON.stringify(unsavedSteps));
     });
   }
 };

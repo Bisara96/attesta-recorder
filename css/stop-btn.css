@@ -1,0 +1,12 @@
+#fyp-record-stop-btn {
+    position: fixed;
+    bottom: 10%;
+    right: 10%;
+    transform: translate(-50%, -50%);
+}
+
+#fyp-record-stop-btn-div {
+    position: fixed;
+    top: 0;
+    left: 0;
+}
