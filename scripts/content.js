@@ -2,10 +2,7 @@
 let step = {};
 let recording = false;
 let unsavedSteps = [];
-
-const threadId = Math.random();
-
-console.log('START OF THREAD '+threadId);
+let id = -999;
 
 /* Generate XPath for UI Objects */
 const getElementXPath = (element) => {
@@ -39,9 +36,36 @@ const getElementTreeXPath = (element) => {
   return paths.length ? '/' + paths.join('/') : null;
 };
 
+const generateElementKeywords = (element) => {
+  let keywordsStr = '';
+  const tagName = element.nodeName.toLowerCase();
+  keywordsStr += tagName;
+  if (element.getAttribute('name')) keywordsStr += ' '+element.getAttribute('name');
+  if (tagName == 'button' ) keywordsStr += ' '+element.innerText;
+  if (tagName == 'input' && element.getAttribute('placeholder')) keywordsStr += ' '+element.getAttribute('placeholder');
+  if (tagName == 'input') {
+    const labelTxt = getLabelTextOfEl(element);
+    keywordsStr += labelTxt ? ' '+labelTxt : '';
+  }
+  return keywordsStr;
+};
+
+const getLabelTextOfEl = (element) => {
+  const id = element.getAttribute('id');
+  const elArray = element.form.getElementsByTagName('label');
+  for (const el of elArray) {
+    if (el.htmlFor == id) {
+      console.log('FOUND LABEL FOR '+id+' '+el.innerText);
+      return el.innerText;
+    }
+  }
+  return false;
+};
+
 /* Send a message to background script to see if theres and ongoing record */
 chrome.runtime.sendMessage({method: 'getStatus'}, (isRecording) => {
-  if (isRecording == 'true') {
+  if (isRecording.status === true) {
+    id = isRecording.id;
     continueRecord();
   }
 });
@@ -51,21 +75,22 @@ window.addEventListener('message', (event) => {
   if (event.source != window) return;
 
   if (event.data.type && event.data.type == 'startRecording') {
-    record();
+    record(event.data.id);
   } else if (event.data.type && event.data.type == 'stopRecording') {
     stopRecord();
   }
 });
 
 /* Start a new record */
-const record = () => {
+const record = (id) => {
+  id = id;
   recording = true;
   unsavedSteps = [];
   setSteps([]);
   console.log('Starting record');
   bindEventsToRecord();
   addStopButton();
-  chrome.runtime.sendMessage({method: 'setStatus', status: true});
+  chrome.runtime.sendMessage({method: 'setStatus', status: true, id: id});
 };
 
 /* Continue the ongoing record */
@@ -73,7 +98,7 @@ const continueRecord = () => {
   chrome.storage.sync.get(['steps'], (items) => {
     recording = true;
     unsavedSteps = items.steps;
-    console.log('Continuing record THREAD '+threadId+' : STEPS : '+JSON.stringify(unsavedSteps));
+    console.log('Continuing record : STEPS : '+JSON.stringify(unsavedSteps));
     bindEventsToRecord();
     addStopButton();
   });
@@ -85,7 +110,7 @@ const stopRecord = () => {
   unbindEventsToRecord();
   removeStopButton();
   console.log('Record Stopped');
-  chrome.runtime.sendMessage({method: 'setStatus', status: false});
+  chrome.runtime.sendMessage({method: 'setStatus', status: false, id: -999});
   sendToAgent();
 };
 
@@ -137,6 +162,7 @@ const onClick = (e) => {
   console.log('click on ' + getElementXPath(targetElement));
   step.type = 'click';
   step.xpath = getElementXPath(targetElement);
+  step.keywords = generateElementKeywords(targetElement);
   saveStep(step);
 };
 
@@ -150,6 +176,7 @@ const onChange = (e) => {
     step.type = 'select';
     step.displayText = getDropdownSelectedOption();
     step.xpath = getElementXPath(targetElement);
+    step.keywords = generateElementKeywords(targetElement);
     saveStep(step);
   } else if (isValidType(e.target)) {
     const value = (e.target.value || '').replace(/\n/g, '\\n');
@@ -159,6 +186,7 @@ const onChange = (e) => {
     step.type = 'type';
     step.value = value;
     step.xpath = getElementXPath(targetElement);
+    step.keywords = generateElementKeywords(targetElement);
     saveStep(step);
   }
 };
@@ -173,6 +201,7 @@ const onKeyPress = (e) => {
   step.type = 'press';
   step.keycode = e.keyCode;
   step.xpath = getElementXPath(targetElement);
+  step.keywords = generateElementKeywords(targetElement);
   saveStep(step);
 };
 
@@ -209,13 +238,12 @@ const setSteps = (stepsList) => {
 };
 
 const sendToAgent = () => {
-  chrome.storage.sync.get(['steps'], function(items) {
-    console.log('Steps : \n' + JSON.stringify(items.steps));
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', 'http://localhost:8080/record/stop', true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.send(JSON.stringify(items.steps));
-  });
+  console.log('Steps : \n' + JSON.stringify(unsavedSteps));
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', 'http://localhost:8080/record/stop', true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.send(JSON.stringify({id: id, steps: unsavedSteps}));
+  console.log(JSON.stringify({id: id, steps: unsavedSteps}));
 };
 
 const addStopButton = () => {
@@ -236,7 +264,7 @@ const removeStopButton = () => {
 window.onbeforeunload = (event) => {
   if (recording) {
     chrome.storage.sync.set({steps: unsavedSteps}, () => {
-      console.log('Uploaded : THREAD '+threadId+' : STEPS : '+JSON.stringify(unsavedSteps));
+      console.log('Uploaded : STEPS : '+JSON.stringify(unsavedSteps));
     });
   }
 };
