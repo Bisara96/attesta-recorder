@@ -251,7 +251,8 @@ const addStopButton = () => {
   div.id = 'fyp-record-stop-btn-div';
   const btn = document.createElement('BUTTON');
   btn.id = 'fyp-record-stop-btn';
-  const btnText = document.createTextNode('STOP');
+  btn.classList.add('fyp-record-stop-btn');
+  const btnText = document.createTextNode('Stop Recording');
   btn.appendChild(btnText);
   div.appendChild(btn);
   document.body.appendChild(div);
