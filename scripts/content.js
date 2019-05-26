@@ -3,6 +3,8 @@ let step = {};
 let recording = false;
 let unsavedSteps = [];
 let id = -999;
+let pendingSave = false;
+let testMsg = '';
 
 /* Generate XPath for UI Objects */
 const getElementXPath = (element) => {
@@ -40,26 +42,27 @@ const generateElementKeywords = (element) => {
   let keywordsStr = '';
   const tagName = element.nodeName.toLowerCase();
   keywordsStr += tagName;
-  if (element.getAttribute('name')) keywordsStr += ' '+element.getAttribute('name');
-  if (tagName == 'button' ) keywordsStr += ' '+element.innerText;
-  if (tagName == 'input' && element.getAttribute('placeholder')) keywordsStr += ' '+element.getAttribute('placeholder');
+  if (element.getAttribute('name')) keywordsStr += ','+element.getAttribute('name');
+  if (['a', 'button', 'ul'].indexOf(tagName) !== -1) keywordsStr += ','+element.innerText;
+  if (tagName == 'input' && element.getAttribute('placeholder')) keywordsStr += ','+element.getAttribute('placeholder');
   if (tagName == 'input') {
     const labelTxt = getLabelTextOfEl(element);
-    keywordsStr += labelTxt ? ' '+labelTxt : '';
+    keywordsStr += labelTxt ? ','+labelTxt : '';
   }
   return keywordsStr;
 };
 
 const getLabelTextOfEl = (element) => {
   const id = element.getAttribute('id');
+  const name = element.getAttribute('name');
   const elArray = element.form.getElementsByTagName('label');
   for (const el of elArray) {
-    if (el.htmlFor == id) {
+    if ([id, name].indexOf(el.htmlFor) !== -1) {
       console.log('FOUND LABEL FOR '+id+' '+el.innerText);
       return el.innerText;
     }
   }
-  return false;
+  return '';
 };
 
 /* Send a message to background script to see if theres and ongoing record */
@@ -78,12 +81,17 @@ window.addEventListener('message', (event) => {
     record(event.data.id);
   } else if (event.data.type && event.data.type == 'stopRecording') {
     stopRecord();
+  } else if (event.data.type && event.data.type == 'takeScreenshot') {
+    chrome.runtime.sendMessage({method: 'takeScreenshot'}, (screenshotURL) => {
+      return screenshotURL;
+    });
   }
 });
 
 /* Start a new record */
-const record = (id) => {
-  id = id;
+const record = (storyID) => {
+  id = storyID;
+  console.log('Recieved message record story '+id);
   recording = true;
   unsavedSteps = [];
   setSteps([]);
@@ -95,13 +103,31 @@ const record = (id) => {
 
 /* Continue the ongoing record */
 const continueRecord = () => {
-  chrome.storage.sync.get(['steps'], (items) => {
-    recording = true;
-    unsavedSteps = items.steps;
-    console.log('Continuing record : STEPS : '+JSON.stringify(unsavedSteps));
-    bindEventsToRecord();
+  unsavedSteps = JSON.parse(localStorage.getItem('steps'));
+  recording = true;
+  console.log('Continuing record : STEPS : '+JSON.stringify(unsavedSteps));
+  bindEventsToRecord();
+  // addStopButton();
+  chrome.runtime.sendMessage({method: 'pending'}, (response) => {
     addStopButton();
+    console.log('CHECKING FOR PENDING SS');
+    if (response.pending) {
+      console.log('FOUND PENDING SS', JSON.stringify(response));
+      if (unsavedSteps[response.index].time == response.time) {
+        unsavedSteps[response.index].screenshot = response.ss;
+        localStorage.setItem('steps', JSON.stringify(unsavedSteps));
+        console.log('ready');
+      }
+      chrome.runtime.sendMessage({method: 'updated'});
+    }
   });
+  // chrome.storage.sync.get(['steps'], (items) => {
+  //   recording = true;
+  //   unsavedSteps = items.steps;
+  //   console.log('Continuing record : STEPS : '+JSON.stringify(unsavedSteps));
+  //   bindEventsToRecord();
+  //   addStopButton();
+  // });
 };
 
 /* Stop the ongoing record */
@@ -114,14 +140,38 @@ const stopRecord = () => {
   sendToAgent();
 };
 
+const notEnterClick = (el, time) => {
+  if (unsavedSteps.length > 0) {
+    const preStep = unsavedSteps[unsavedSteps.length-1];
+    if (preStep.type == 'type' ) {
+      if (preStep.keycode == 13 && preStep.xpath == getElementXPath(el)) {
+        if (time - preStep.time < 10) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+};
+
 /* Validated the click event UI Object */
 const isValidClick = (el) => {
   const tag = el.tagName.toLowerCase();
   const type = el.getAttribute('type');
 
   if (['a', 'button'].indexOf(tag) !== -1) return true;
-  if (tag === 'input' && ['button', 'submit'].indexOf(type) === -1) return false;
-  return true;
+  else if (tag === 'input' && ['button', 'submit'].indexOf(type) !== -1) return true;
+  if (el.parentElement && isValidClickParent(el.parentElement)) return true;
+  return false;
+};
+
+const isValidClickParent = (el) => {
+  const tag = el.tagName.toLowerCase();
+  const type = el.getAttribute('type');
+
+  if (['a', 'button'].indexOf(tag) !== -1) return true;
+  else if (tag === 'input' && ['button', 'submit'].indexOf(type) !== -1) return true;
+  return false;
 };
 
 /* Validate the Select event UI Object */
@@ -144,74 +194,109 @@ const isValidType = (el) => {
 };
 
 const isValidKeyPress = (e) => {
-  const keycode = e.keyCode;
-  const el = e.target;
-  if ((keycode >= 48 && keycode <=57) || (keycode >= 65 && keycode <= 90)) return false;
-  if ([32].indexOf(keycode) !== -1 && el.tagName.toLowerCase() == 'input') return false;
-  return true;
+  // const keycode = e.keyCode;
+  // const el = e.target;
+  // if ((keycode >= 48 && keycode <=57) || (keycode >= 65 && keycode <= 90)) return false;
+  // if ([32, 9, 20, 16, 8, 46].indexOf(keycode) !== -1 && ['input', 'textarea'].indexOf(el.tagName.toLowerCase()) !== -1) return false;
+  // return true;
+  return false;
 };
 
 const onClick = (e) => {
+  console.log('click '+Date.now());
   if (e.target.id == 'fyp-record-stop-btn') {
     stopRecord();
     return;
+  } else if (!notEnterClick(e.target, Date.now())) {
+    return;
   }
   if (!isValidClick(e.target)) return;
-  const targetElement = event.target || event.srcElement;
+  const targetElement = e.target || e.srcElement;
   step = {};
   console.log('click on ' + getElementXPath(targetElement));
   step.type = 'click';
-  step.xpath = getElementXPath(targetElement);
-  step.keywords = generateElementKeywords(targetElement);
+  step.x = e.clientX;
+  step.y = e.clientY;
+  step.UIObject = getUIObject(e.target || e.srcElement);
+  // step.xpath = getElementXPath(targetElement);
+  // step.keywords = generateElementKeywords(targetElement);
+  step.time = Date.now();
   saveStep(step);
 };
 
 const onChange = (e) => {
   if (isValidSelect(e.target)) {
-    const targetElement = event.target || event.srcElement;
+    const targetElement = e.target || e.srcElement;
+    const selectedOption = getDropdownSelectedOption(e.target);
     console.log(
-        'select ' + getDropdownSelectedOption() + ' of ' + getElementXPath(targetElement)
+        'select ' + selectedOption + ' of ' + getElementXPath(targetElement)
     );
     step = {};
     step.type = 'select';
-    step.displayText = getDropdownSelectedOption();
-    step.xpath = getElementXPath(targetElement);
-    step.keywords = generateElementKeywords(targetElement);
+    step.selectedOption = selectedOption;
+    step.UIObject = getUIObject(e.target || e.srcElement);
+    // step.xpath = getElementXPath(targetElement);
+    // step.keywords = generateElementKeywords(targetElement);
+    step.time = Date.now();
     saveStep(step);
   } else if (isValidType(e.target)) {
     const value = (e.target.value || '').replace(/\n/g, '\\n');
-    const targetElement = event.target || event.srcElement;
+    const targetElement = e.target || e.srcElement;
     console.log('type ' + value + ' on ' + getElementXPath(targetElement));
     step = {};
     step.type = 'type';
     step.value = value;
-    step.xpath = getElementXPath(targetElement);
-    step.keywords = generateElementKeywords(targetElement);
+    step.UIObject = getUIObject(e.target || e.srcElement);
+    // step.xpath = getElementXPath(targetElement);
+    // step.keywords = generateElementKeywords(targetElement);
+    step.time = Date.now();
     saveStep(step);
   }
 };
 
 const onKeyPress = (e) => {
+  console.log('key press '+e.keyCode+' '+Date.now());
   if (!isValidKeyPress(e)) return;
-  const targetElement = event.target || event.srcElement;
+  const targetElement = e.target || e.srcElement;
   console.log(
       'press ' + e.keyCode + ' on ' + getElementXPath(targetElement)
   );
   step = {};
   step.type = 'press';
-  step.keycode = e.keyCode;
-  step.xpath = getElementXPath(targetElement);
-  step.keywords = generateElementKeywords(targetElement);
+  step.keyCode = e.keyCode;
+  step.UIObject = getUIObject(e.target || e.srcElement);
+  // step.xpath = getElementXPath(targetElement);
+  // step.keywords = generateElementKeywords(targetElement);
+  step.time = Date.now();
   saveStep(step);
+};
+
+const getUIObject = (e) => {
+  const xpath = getElementXPath(e);
+  const tagName = e.nodeName.toLowerCase();
+  const elementID = e.getAttribute('id') ? e.getAttribute('id') : '';
+  const name = e.getAttribute('name') ? e.getAttribute('name') : '';
+  const placeholder = e.getAttribute('placeholder') ? e.getAttribute('placeholder') : '';
+  const innerText = e.innerText ? e.innerText : '';
+  const label = getLabelTextOfEl(e);
+  return {
+    tagName: tagName,
+    elementID: elementID,
+    name: name,
+    xpath: xpath,
+    label: label,
+    innerText: innerText,
+    placeholder: placeholder,
+  };
 };
 
 // const getCheckBoxSelectedState = (e) => {
 //   return e.target.checked;
 // };
 
-const getDropdownSelectedOption = (e) => {
-  const value = e.target.value;
-  const $option = Array.from(e.target.children).find(
+const getDropdownSelectedOption = (el) => {
+  const value = el.value;
+  const $option = Array.from(el.children).find(
       ($op) => $op.value === value
   );
   return $option.text.trim();
@@ -230,11 +315,26 @@ const unbindEventsToRecord = () => {
 };
 
 const saveStep = (step) => {
+  this.pendingSave = true;
+  this.testMsg = 'PENDING SAVE '+step.type+' '+JSON.stringify(step.UIObject);
+  console.log('saving step '+JSON.stringify(step));
   unsavedSteps.push(step);
+  localStorage.setItem('steps', JSON.stringify(unsavedSteps));
+  index = unsavedSteps.length-1;
+  removeStopButton();
+  chrome.runtime.sendMessage({method: 'takeScreenshot', index: index, time: step.time}, (response) => {
+    addStopButton();
+    unsavedSteps[unsavedSteps.length-1].screenshot = response.imgSrc;
+    localStorage.setItem('steps', JSON.stringify(unsavedSteps));
+    console.log('saved step '+JSON.stringify(step));
+    this.pendingSave = false;
+    this.testMsg = 'SAVED '+step.type+' '+JSON.stringify(step.UIObject);
+    chrome.runtime.sendMessage({method: 'updated'});
+  });
 };
 
 const setSteps = (stepsList) => {
-  chrome.storage.sync.set({steps: stepsList});
+  localStorage.setItem('steps', JSON.stringify(stepsList));
 };
 
 const sendToAgent = () => {
@@ -263,9 +363,12 @@ const removeStopButton = () => {
 };
 
 window.onbeforeunload = (event) => {
-  if (recording) {
-    chrome.storage.sync.set({steps: unsavedSteps}, () => {
-      console.log('Uploaded : STEPS : '+JSON.stringify(unsavedSteps));
-    });
-  }
+  console.log('STATUS : '+this.testMsg);
+  // while (this.pendingSave) {
+  //   console.log('waiting for steps to save');
+  //   console.log(this.testMsg);
+  // }
+  // if (recording) {
+  //   localStorage.setItem('steps', JSON.stringify(unsavedSteps));
+  // }
 };
