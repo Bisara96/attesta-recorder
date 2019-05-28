@@ -65,12 +65,14 @@ const getLabelTextOfEl = (element) => {
   return '';
 };
 
-/* Send a message to background script to see if theres and ongoing record */
-chrome.runtime.sendMessage({method: 'getStatus'}, (isRecording) => {
-  if (isRecording.status === true) {
-    id = isRecording.id;
-    continueRecord();
-  }
+window.addEventListener('load', (event) => {
+  /* Send a message to background script to see if theres and ongoing record */
+  chrome.runtime.sendMessage({method: 'getStatus'}, (isRecording) => {
+    if (isRecording.status === true) {
+      id = isRecording.id;
+      continueRecord();
+    }
+  });
 });
 
 /* Listen for messages from the DOM */
@@ -121,6 +123,21 @@ const continueRecord = () => {
       chrome.runtime.sendMessage({method: 'updated'});
     }
   });
+  // setTimeout(() => {
+  //   chrome.runtime.sendMessage({method: 'pending'}, (response) => {
+  //     addStopButton();
+  //     console.log('CHECKING FOR PENDING SS');
+  //     if (response.pending) {
+  //       console.log('FOUND PENDING SS', JSON.stringify(response));
+  //       if (unsavedSteps[response.index].time == response.time) {
+  //         unsavedSteps[response.index].screenshot = response.ss;
+  //         localStorage.setItem('steps', JSON.stringify(unsavedSteps));
+  //         console.log('ready');
+  //       }
+  //       chrome.runtime.sendMessage({method: 'updated'});
+  //     }
+  //   });
+  // }, 2000);
   // chrome.storage.sync.get(['steps'], (items) => {
   //   recording = true;
   //   unsavedSteps = items.steps;
