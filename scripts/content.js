@@ -5,6 +5,7 @@ let unsavedSteps = [];
 let id = -999;
 let pendingSave = false;
 let testMsg = '';
+let server = '';
 
 /* Generate XPath for UI Objects */
 const getElementXPath = (element) => {
@@ -70,6 +71,7 @@ window.addEventListener('load', (event) => {
   chrome.runtime.sendMessage({method: 'getStatus'}, (isRecording) => {
     if (isRecording.status === true) {
       id = isRecording.id;
+      server = localStorage.getItem('server');
       continueRecord();
     }
   });
@@ -81,6 +83,8 @@ window.addEventListener('message', (event) => {
 
   if (event.data.type && event.data.type == 'startRecording') {
     record(event.data.id);
+    server = event.data.server;
+    localStorage.setItem('server', server);
   } else if (event.data.type && event.data.type == 'stopRecording') {
     stopRecord();
   } else if (event.data.type && event.data.type == 'takeScreenshot') {
@@ -357,7 +361,7 @@ const setSteps = (stepsList) => {
 const sendToAgent = () => {
   console.log('Steps : \n' + JSON.stringify(unsavedSteps));
   const xhr = new XMLHttpRequest();
-  xhr.open('POST', 'http://localhost:8080/record/stop', true);
+  xhr.open('POST', server+'/record/stop', true);
   xhr.setRequestHeader('Content-Type', 'application/json');
   xhr.send(JSON.stringify({id: id, steps: unsavedSteps}));
   console.log(JSON.stringify({id: id, steps: unsavedSteps}));
